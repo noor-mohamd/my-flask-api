@@ -1,60 +1,53 @@
 from flask import Flask, request, jsonify
 import sqlite3
+from werkzeug.security import generate_password_hash
 
 app = Flask(__name__)
 
-def init_db():
-    conn = sqlite3.connect("database.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE,
-            job_title TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
+# Database connection helper
+def get_db_connection():
+    conn = sqlite3.connect('database.db')
+    conn.row_factory = sqlite3.Row
+    return conn
 
+# Home Route (Just to check if API is live)
 @app.route('/')
-def home():
-    return "<h1>Backend API Status: Online</h1><p>The Flask server is running successfully.</p>"
+def index():
+    return jsonify({"status": "API is running", "developer": "Mohamed"})
 
-@app.route('/add', methods=['POST'])
-def add_user():
-    data = request.json
-    username = data.get('username')
-    job = data.get('job_title')
+# Register Route (The service you sell to clients)
+@app.route('/api/register', methods=['POST'])
+def register():
+    data = request.get_json()
     
-    if not username or not job:
-        return jsonify({"error": "Missing data"}), 400
-        
-    try:
-        conn = sqlite3.connect("database.db")
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO users (username, job_title) VALUES (?, ?)", (username, job))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "User added successfully"}), 201
-    except sqlite3.IntegrityError:
-        return jsonify({"error": "Username already exists"}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    if not data or 'username' not in data or 'password' not in data:
+        return jsonify({"error": "Missing username or password"}), 400
 
-@app.route('/users', methods=['GET'])
-def get_users():
-    conn = sqlite3.connect("database.db")
+    username = data['username']
+    # Hashing the password for security (Cybersecurity Best Practice)
+    hashed_password = generate_password_hash(data['password'])
+
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users")
-    rows = cursor.fetchall()
+    
+    try:
+        cursor.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hashed_password))
+        conn.commit()
+        return jsonify({"message": "User created successfully"}), 201
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "Username already exists"}), 409
+    finally:
+        conn.close()
+
+# Get all users route
+@app.route('/api/users', methods=['GET'])
+def get_users():
+    conn = get_db_connection()
+    users = conn.execute('SELECT id, username FROM users').fetchall()
     conn.close()
     
-    users_list = []
-    for row in rows:
-        users_list.append({"id": row[0], "username": row[1], "job_title": row[2]})
-        
-    return jsonify(users_list)
+    user_list = [dict(user) for user in users]
+    return jsonify(user_list)
 
 if __name__ == '__main__':
-    init_db()
-    app.run(debug=True, port=5000)
+    app.run(debug=True)
